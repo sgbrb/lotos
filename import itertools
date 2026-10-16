@@ -1,0 +1,121 @@
+import itertools
+import os
+import pandas as pd
+import requests
+
+# 1. Definições de Grupos Estatísticos Fixos da Lotofácil
+MOLDURA = {1, 2, 3, 4, 5, 6, 10, 11, 15, 16, 20, 21, 22, 23, 24, 25}
+PRIMOS  = {2, 3, 5, 7, 11, 13, 17, 19, 23}
+
+def buscar_ultimo_resultado_caixa():
+    """Busca o resultado mais recente de forma automática usando APIs de redundância."""
+    print("Conectando à internet para buscar o resultado mais recente...")
+    
+    # API Principal
+    try:
+        url = "https://herokuapp.com"
+        resposta = requests.get(url, timeout=8)
+        if resposta.status_code == 200:
+            dados = resposta.json()
+            concurso = dados.get("concurso", "N/A")
+            dezenas = set(map(int, dados.get("dezenas", [])))
+            print(f"[SUCESSO] API 1 localizou o Concurso {concurso}.")
+            return dezenas
+    except:
+        pass
+
+    # API Secundária de Backup (Caso a primeira caia)
+    try:
+        url = "https://loteriasapi.com.br"
+        resposta = requests.get(url, timeout=8)
+        if resposta.status_code == 200:
+            dados = resposta.json()  # CORRIGIDO AQUI: de 'r.json' para 'resposta.json'
+            dezenas = set(map(int, dados.get("dezenas", [])))
+            print("[SUCESSO] API 2 de backup localizou o último concurso.")
+            return dezenas
+    except:
+        pass
+
+    # Backup manual definitivo em caso de pane geral na internet (Concurso 3220)
+    print("[AVISO] Sem conexão com as APIs. Usando dados estáveis de contingência.")
+    return {1, 3, 4, 6, 7, 9, 10, 11, 13, 15, 17, 18, 19, 20, 22}
+
+# Executa a captura sem intervenção humana
+ultimo_concurso_real = buscar_ultimo_resultado_caixa()
+
+def calcular_max_sequencia(jogo):
+    max_seq = 1
+    seq_atual = 1
+    for i in range(len(jogo) - 1):
+        if jogo[i+1] == jogo[i] + 1:
+            seq_atual += 1
+            max_seq = max(max_seq, seq_atual)
+        else:
+            seq_atual = 1
+    return max_seq
+
+print(f"Resultado base para análise: {sorted(list(ultimo_concurso_real))}")
+print("Iniciando a varredura das 3.268.760 combinações para SOMA EXATA = 202...")
+dados_filtrados = []
+
+for jogo_tuple in itertools.combinations(range(1, 26), 15):
+    jogo_set = set(jogo_tuple)
+    
+    # Filtro de Soma Estrito em 202
+    somatoria = sum(jogo_tuple)
+    if somatoria != 202:
+        continue
+
+    # Filtro de Repetidos baseado no jogo capturado online
+    repetidos = len(jogo_set.intersection(ultimo_concurso_real))
+    if repetidos != 10:
+        continue
+
+    # Filtros Estatísticos de Ouro
+    impares = len([n for n in jogo_tuple if n % 2 != 0])
+    if impares < 8 or impares > 9:
+        continue
+    pares = 15 - impares
+
+    qtd_moldura = len(jogo_set.intersection(MOLDURA))
+    if qtd_moldura < 9 or qtd_moldura > 11:
+        continue
+    qtd_retrato = 15 - qtd_moldura
+
+    if calcular_max_sequencia(jogo_tuple) > 4:
+        continue
+
+    # Sistema de Pontuação de Elite
+    pontuacao = 0
+    if impares == 8: pontuacao += 3
+    if qtd_moldura == 10: pontuacao += 3
+    
+    qtd_primos = len(jogo_set.intersection(PRIMOS))
+    if qtd_primos == 5 or qtd_primos == 6: pontuacao += 4
+
+    dados_filtrados.append({
+        "Jogo": list(jogo_tuple),
+        "Score_Elite": pontuacao,
+        "Soma": somatoria,
+        "Repetidos": repetidos,
+        "Imp/Par": f"{impares}/{pares}",
+        "Mold/Retr": f"{qtd_moldura}/{qtd_retrato}",
+        "Primos": qtd_primos
+    })
+
+if dados_filtrados:
+    df_completo = pd.DataFrame(dados_filtrados)
+    df_top_10 = df_completo.sort_values(by=["Score_Elite"], ascending=[False]).head(10)
+    
+    print("\n" + "="*85)
+    print("                     🏆 TOP 10 JOGOS DE ELITE - SOMA FIXADA EM 202")
+    print("="*85)
+    print(df_top_10.to_string(index=False))
+    print("="*85)
+    
+    # Define o caminho dinâmico para salvar no Desktop de qualquer computador (Windows)
+    caminho_desktop = os.path.join(os.path.expanduser("~"), "Desktop", "top_10_lotofacil.csv")
+    df_top_10.to_csv(caminho_desktop, index=False)
+    print(f"\n[SALVO COM SUCESSO] O arquivo foi gerado em: {caminho_desktop}")
+else:
+    print("\nNenhuma combinação atendeu aos critérios hoje.")
